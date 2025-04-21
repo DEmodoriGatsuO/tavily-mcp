@@ -2,10 +2,13 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { HttpServerTransport } from "@modelcontextprotocol/sdk/server/http.js"; // 追加
 import {CallToolRequestSchema, ListToolsRequestSchema, Tool} from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
 import dotenv from "dotenv";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import express from "express";
+import cors from "cors";
 
 dotenv.config();
 
@@ -257,10 +260,35 @@ class TavilyClient {
   }
 
 
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("Tavily MCP server running on stdio");
+  async run(transportType = "stdio"): Promise<void> {
+    if (transportType === "stdio") {
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      console.error("Tavily MCP server running on stdio");
+    } else if (transportType === "sse") {
+      const app = express();
+      const port = process.env.PORT || 3000;
+      
+      app.use(cors());
+      
+      app.get('/sse', async (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        
+        const transport = new HttpServerTransport(req, res);
+        await this.server.connect(transport);
+      });
+      
+      // ルートへのアクセスでステータスを返す（ヘルスチェック用）
+      app.get('/', (req, res) => {
+        res.json({ status: 'Tavily MCP Server running', version: '0.1.4' });
+      });
+      
+      app.listen(port, () => {
+        console.error(`Tavily MCP server running on SSE at http://localhost:${port}/sse`);
+      });
+    }
   }
 
   async search(params: any): Promise<TavilyResponse> {
@@ -338,5 +366,6 @@ export async function serve(): Promise<void> {
   await client.run();
 }
 
+const transportType = process.env.TRANSPORT_TYPE || "stdio";
 const server = new TavilyClient();
-server.run().catch(console.error);
+server.run(transportType).catch(console.error);
